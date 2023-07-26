@@ -1,13 +1,18 @@
+import paramiko, re, os, os.path
 '''
 This script will compare active torrents in Deluge and downloaded data on a host to find orphaned files. 
 It assumes downloads are in the Downloads folder in the home directory and deluge-console is in bin.
 It also assumes there is a public/private key pair set up with the host.
 '''
-import paramiko, re
 
 server = 'moon.usbx.me'
 username = 'bron7'
 pkey = paramiko.RSAKey.from_private_key_file("/home/brian/.ssh/usbx") # Private key file location
+
+def get_directory_and_extension(filepath):
+    directory, filename = os.path.split(filepath)
+    basename, extension = os.path.splitext(filename)
+    return directory, extension
 
 get_torrents_command = "bin/deluge-console 'connect 127.0.0.1:11906 ; info -v'"
 get_downloads_command = "find Downloads -type f"
@@ -53,15 +58,24 @@ for download in download_list.split("\n"):
 files_cleaned = [item for item in files_cleaned if item]
 downloads_cleaned = [item for item in downloads_cleaned if item]
 
+files_cleaned_directories = set(get_directory_and_extension(filepath)[0] for filepath in files_cleaned)
+files_cleaned_archives = set(filepath for filepath in files_cleaned if get_directory_and_extension(filepath)[1] in ['.zip', '.rar', '.tar'])
+
 files_cleaned = sorted(files_cleaned)
 downloads_cleaned = sorted(downloads_cleaned)
 
-downloads_not_active = list(set(downloads_cleaned) - set(files_cleaned))
-active_not_downloaded = list(set(files_cleaned) - set(downloads_cleaned))
+downloads_not_active = [filepath for filepath in downloads_cleaned if filepath not in files_cleaned]
+downloads_not_active = [
+    filepath for filepath in downloads_not_active
+    if not (get_directory_and_extension(filepath)[1] in ['.mp4', '.avi', '.mkv'] and
+            get_directory_and_extension(filepath)[0] in files_cleaned_directories and
+            any(os.path.commonpath([filepath, archive]) == get_directory_and_extension(filepath)[0] for archive in files_cleaned_archives))
+]
+
+active_not_downloaded = [filepath for filepath in files_cleaned if filepath not in downloads_cleaned]
 
 downloads_not_active = sorted(downloads_not_active)
 active_not_downloaded = sorted(active_not_downloaded)
-
 
 with open('active_torrents.txt', 'w') as f:
     for torrent in files_cleaned:
