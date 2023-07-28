@@ -28,6 +28,11 @@ def ssh_command(host, command):
     error = stderr.read().decode()
     return result, error
 
+def write_file(filename, list):
+    with open(filename, 'w') as f:
+        for item in list:
+            f.write("%s\n" % item)
+
 def deluge_filename_cleanup(filename):
     pattern = r"(.*)(?=\s\(\d+(\.\d+)?\s[GMK]?iB\) Progress: \d+(\.\d+)?% Priority: (High|Medium|Low))"
     filename_cleaned = re.match(pattern, filename).group(1)
@@ -37,7 +42,7 @@ def deluge_filename_cleanup(filename):
 def extract_torrent_files(torrent_data):
     start_file_list = 0
     torrent_files = []
-    for torrent_file in torrent_data.split("\n"):
+    for torrent_file in torrent_data:
         if "::Peers" in torrent_file and start_file_list == 1:
             start_file_list = 0
         elif "::Files" in torrent_file and start_file_list == 0:
@@ -47,55 +52,43 @@ def extract_torrent_files(torrent_data):
             torrent_files.append(torrent_file)
     return torrent_files
 
-server = ssh_connect(hostname, username, keyfile)
+def get_clean_file_list(host, command):
+    raw_list, errors = ssh_command(host, command)
+    raw_list = raw_list.split("\n")
+    if "deluge-console" in command:
+        final_list = extract_torrent_files(raw_list)
+    elif "Downloads" in command:
+        final_list = [list_item[len("Downloads/"):] for list_item in raw_list if list_item]
+    return final_list
 
-get_torrents_command = "bin/deluge-console 'connect 127.0.0.1:11906 ; info -v'"
-get_downloads_command = "find Downloads -type f"
+def list_compare(download_files, torrent_files):
+    results = []
+    torrent_files_directories = set(get_directory_and_extension(item)[0] for item in torrent_files)
+    torrent_files_archives = set(filepath for filepath in torrent_files if get_directory_and_extension(filepath)[1] in ['.zip', '.rar', '.tar'])
+    results = [filepath for filepath in download_files if filepath not in torrent_files]
+    results = [
+        filepath for filepath in results
+        if not (get_directory_and_extension(filepath)[1] in ['.mp4', '.avi', '.mkv'] and
+                get_directory_and_extension(filepath)[0] in torrent_files_directories and
+                any(os.path.commonpath([filepath, archive]) == get_directory_and_extension(filepath)[0] for archive in torrent_files_archives))
+            ]
+    return results
 
-torrent_list, torrent_errors = ssh_command(server, get_torrents_command)
-download_list, download_errors = ssh_command(server, get_downloads_command)
+def main():
+    server = ssh_connect(hostname, username, keyfile)
 
-torrent_files = extract_torrent_files(torrent_list)
+    torrent_files = get_clean_file_list(server, "bin/deluge-console 'connect 127.0.0.1:11906 ; info -v'")
+    download_files = get_clean_file_list(server, "find Downloads -type f")
 
-downloads_cleaned = []
+    downloads_not_active = list_compare(download_files, torrent_files)
+    active_not_downloaded = [filepath for filepath in torrent_files if filepath not in download_files]
 
-for download in download_list.split("\n"):
-    download_cleaned = download[len("Downloads/"):]
-    downloads_cleaned.append(download_cleaned)
+    downloads_not_active = sorted(downloads_not_active)
+    active_not_downloaded = sorted(active_not_downloaded)
 
-downloads_cleaned = [item for item in downloads_cleaned if item]
+    write_file('active_torrents.txt', torrent_files)
+    write_file('downloads.txt', download_files)
+    write_file('orphans.txt', downloads_not_active)
+    write_file('active_missing_file.txt', active_not_downloaded)
 
-torrent_files_directories = set(get_directory_and_extension(filepath)[0] for filepath in torrent_files)
-torrent_files_archives = set(filepath for filepath in torrent_files if get_directory_and_extension(filepath)[1] in ['.zip', '.rar', '.tar'])
-
-torrent_files = sorted(torrent_files)
-downloads_cleaned = sorted(downloads_cleaned)
-
-downloads_not_active = [filepath for filepath in downloads_cleaned if filepath not in torrent_files]
-downloads_not_active = [
-    filepath for filepath in downloads_not_active
-    if not (get_directory_and_extension(filepath)[1] in ['.mp4', '.avi', '.mkv'] and
-            get_directory_and_extension(filepath)[0] in torrent_files_directories and
-            any(os.path.commonpath([filepath, archive]) == get_directory_and_extension(filepath)[0] for archive in torrent_files_archives))
-]
-
-active_not_downloaded = [filepath for filepath in torrent_files if filepath not in downloads_cleaned]
-
-downloads_not_active = sorted(downloads_not_active)
-active_not_downloaded = sorted(active_not_downloaded)
-
-with open('active_torrents.txt', 'w') as f:
-    for torrent in torrent_files:
-        f.write("%s\n" % torrent)
-
-with open('downloads.txt', 'w') as f:
-    for downloaded in downloads_cleaned:
-        f.write("%s\n" % downloaded)
-
-with open('orphans.txt', 'w') as f:
-    for download_orphan in downloads_not_active:
-        f.write("%s\n" % download_orphan)
-
-with open('active_missing_file.txt', 'w') as f:
-    for missing_file in active_not_downloaded:
-        f.write("%s\n" % missing_file)
+main()
