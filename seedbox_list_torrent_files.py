@@ -63,15 +63,19 @@ def get_clean_file_list(host, command):
 
 def list_compare(download_files, torrent_files):
     results = []
-    torrent_files_directories = set(get_directory_and_extension(item)[0] for item in torrent_files)
-    torrent_files_archives = set(filepath for filepath in torrent_files if get_directory_and_extension(filepath)[1] in ['.zip', '.rar', '.tar'])
-    results = [filepath for filepath in download_files if filepath not in torrent_files]
-    results = [
-        filepath for filepath in results
-        if not (get_directory_and_extension(filepath)[1] in ['.mp4', '.avi', '.mkv'] and
-                get_directory_and_extension(filepath)[0] in torrent_files_directories and
-                any(os.path.commonpath([filepath, archive]) == get_directory_and_extension(filepath)[0] for archive in torrent_files_archives))
-            ]
+    archive_file_directories = set()
+    
+    for filepath in torrent_files:
+        directory, extension = get_directory_and_extension(filepath)
+        if extension in ['.zip', '.rar', '.tar']:
+            archive_file_directories.add(directory)
+
+    for filepath in download_files:
+        if filepath not in torrent_files:
+            directory, extension = get_directory_and_extension(filepath)
+            if not (extension in ['.mp4', '.avi', '.mkv'] and directory in archive_file_directories):
+                results.append(filepath)
+
     return results
 
 def main(hostname, username, keyfile):
