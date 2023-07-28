@@ -74,7 +74,7 @@ def list_compare(download_files, torrent_files):
             ]
     return results
 
-def main():
+def main(hostname, username, keyfile):
     server = ssh_connect(hostname, username, keyfile)
 
     torrent_files = get_clean_file_list(server, "bin/deluge-console 'connect 127.0.0.1:11906 ; info -v'")
@@ -91,4 +91,4 @@ def main():
     write_file('orphans.txt', downloads_not_active)
     write_file('active_missing_file.txt', active_not_downloaded)
 
-main()
+main(hostname, username, keyfile)
